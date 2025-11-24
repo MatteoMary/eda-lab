@@ -22,10 +22,58 @@ export class EDAAppStack extends cdk.Stack {
       publicReadAccess: false,
     });
 
+      // Integration infrastructure
+
+      const imageProcessQueue = new sqs.Queue(this, "img-process-q", {
+      receiveMessageWaitTime: cdk.Duration.seconds(10),
+    });
+
+        const newImageTopic = new sns.Topic(this, "NewImageTopic", {
+      displayName: "New Image topic",
+    }); 
+
+
+  // Lambda functions
+
+    const processImageFn = new lambdanode.NodejsFunction(
+      this,
+      "ProcessImage",
+      {
+        runtime: lambda.Runtime.NODEJS_18_X,
+        entry: `${__dirname}/../lambdas/processImage.ts`,
+        timeout: cdk.Duration.seconds(15),
+        memorySize: 128,
+      }
+    );
+
+    // S3 --> SQS
+        imagesBucket.addEventNotification(
+        s3.EventType.OBJECT_CREATED,
+        new s3n.SnsDestination(newImageTopic)  // Changed
+    );
+
+        newImageTopic.addSubscription(
+      new subs.SqsSubscription(imageProcessQueue)
+    );
+
+   // SQS --> Lambda
+    const newImageEventSource = new events.SqsEventSource(queue, {
+      batchSize: 5,
+      maxBatchingWindow: cdk.Duration.seconds(5),
+    });
+
+    processImageFn.addEventSource(newImageEventSource);
+
+    // Permissions
+
+    imagesBucket.grantRead(processImageFn);
+
     // Output
     
     new cdk.CfnOutput(this, "bucketName", {
       value: imagesBucket.bucketName,
     });
+
+
   }
 }
